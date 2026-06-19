@@ -1,0 +1,22 @@
+# Data (large / derived — not versioned)
+dataset/*.csv
+*.parquet
+qdrant_storage/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# OS / tooling
+.DS_Store
+.env
+
+# Eval artifacts (keep results/*.md, ignore heavy dumps)
+eval/results/*.parquet
+eval/results/*.csv
+
+#raw data
+raw/
