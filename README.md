@@ -18,11 +18,22 @@ pip install -r requirements.txt
 # 2. Подготовка данных (Этап 1): дедуп сущностей -> parquet
 python -m src.data.loader
 
-# 3. Поднять векторную БД
+# 3. Поднять векторную БД и проиндексировать сущности
 docker compose up -d qdrant
+python -m src.vectorstore.indexer        # Этап 2
+
+# 4. Оффлайн-евалюация retrieval (dense / BM25 / hybrid)
+python -m eval.run_eval --limit 500      # Этап 4 -> eval/results/comparison.md
+
+# 5. LLM-слой (нужен Groq-ключ в .env как groq_api_key)
+python -m src.llm.pipeline --vacancy_id 126167948 --resume_id 6969174
+
+# 6. UI
+streamlit run src/app/streamlit_app.py
 ```
 
 ## Статус
 
-Прогресс по этапам — `wiki/Roadmap.md`. Сделано: Этап 0 (структура), Этап 1
-(загрузка + дедуп данных).
+Прогресс по этапам — `wiki/Roadmap.md`. Сделано: Этапы 0–6 (данные, индексация,
+retrieval, оффлайн-евалюация, LLM-слой, Streamlit UI). Осталось: Этап 7
+(README-документация с метриками и скриншотами).

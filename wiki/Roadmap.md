@@ -63,11 +63,15 @@
 > Нюанс: релевантному резюме LLM дал `reject` — score vs `target` измеряют разное,
 > см. [[LLM_Pipeline]] Open questions.
 
-## Этап 6 — Streamlit-приложение
-- [ ] Выбор вакансии (dropdown/поиск по `vacancy_name`).
-- [ ] Список top-K резюме с score.
-- [ ] Клик по резюме → gap-анализ + объяснение.
-- [ ] Вкладка «Метрики качества» из `eval/results/`.
+## Этап 6 — Streamlit-приложение ✅
+- [x] Выбор вакансии (searchable selectbox по `vacancy_name` + id) — `src/app/streamlit_app.py`.
+- [x] Список top-K резюме с score; режим dense/bm25/hybrid + опц. фильтры (город/статус/опыт) в сайдбаре.
+- [x] Разворот резюме → кнопка «LLM-анализ» → профиль + gaps (severity) + score/рекомендация/объяснение.
+- [x] Вкладка «Метрики качества» рендерит `eval/results/comparison.md` + per-vacancy таблицу.
+
+> Запуск: `streamlit run src/app/streamlit_app.py`. Проверено через `streamlit.testing`
+> (AppTest): скрипт исполняется end-to-end, поиск рендерит кандидатов, без ошибок.
+> LLM-вкладка переиспользует протестированный `pipeline.evaluate_candidate` ([[LLM_Pipeline]]).
 
 ## Этап 7 — README и документация
 - [ ] Архитектурная диаграмма.
