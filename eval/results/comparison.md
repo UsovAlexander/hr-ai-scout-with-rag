@@ -1,6 +1,6 @@
 # Retrieval comparison — dense / BM25 / hybrid
 
-_Generated 2026-06-20 10:55 by `python -m eval.run_eval`._
+_Generated 2026-06-20 13:59 by `python -m eval.run_eval`._
 
 - Embedding model: `cointegrated/LaBSE-en-ru` (dim 768, Cosine)
 - Vacancies evaluated (macro-average): **500**

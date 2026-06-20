@@ -20,6 +20,12 @@ PAIRS_PARQUET = DATASET_DIR / "pairs.parquet"  # ground truth for eval/
 
 # Cached BM25 index over the resume corpus (Этап 3)
 BM25_RESUMES_PKL = DATASET_DIR / "bm25_resumes.pkl"
+# Russian lemmatization + stopword removal for BM25. Measurably LOWERED recall@10
+# on this corpus (0.435 -> 0.348, see eval/results), so default OFF; kept as a
+# switch for ablation. See wiki/Hybrid_Search.md.
+BM25_LEMMATIZE = False
+# Encodes the tokenization mode -> BM25 cache auto-rebuilds when the mode flips.
+BM25_NORM_VERSION = "lemma-v1" if BM25_LEMMATIZE else "simple-v1"
 
 # --- CSV reading -----------------------------------------------------------
 # total_df.csv is ~2GB → read in chunks, never load naively into RAM.

@@ -134,19 +134,28 @@ def _vacancy_text(vacancy_id: str) -> str:
     return build_vacancy_text(row).iloc[0]
 
 
-def evaluate_candidate(vacancy_id, resume_id, model: str = config.LLM_MODEL) -> CandidateEvaluation:
-    """Full chain for one (vacancy, resume) pair."""
-    vacancy_text = _vacancy_text(vacancy_id)
-    resume_text = _resume_text(resume_id)
-
+def evaluate_with_texts(vacancy_text: str, resume_text: str, vacancy_id, resume_id,
+                        model: str = config.LLM_MODEL) -> CandidateEvaluation:
+    """Full chain given the raw vacancy and resume texts."""
     profile = extract_profile(resume_text, model)
     gaps = analyze_gaps(profile, vacancy_text, model)
     verdict = score_candidate(profile, gaps, vacancy_text, model)
-
     return CandidateEvaluation(
         vacancy_id=str(vacancy_id), resume_id=str(resume_id),
         profile=profile, gap_analysis=gaps, verdict=verdict,
     )
+
+
+def evaluate_candidate(vacancy_id, resume_id, model: str = config.LLM_MODEL) -> CandidateEvaluation:
+    """Full chain for a stored vacancy x resume pair."""
+    return evaluate_with_texts(_vacancy_text(vacancy_id), _resume_text(resume_id),
+                               vacancy_id, resume_id, model)
+
+
+def evaluate_custom_vacancy(vacancy_text: str, resume_id, model: str = config.LLM_MODEL
+                            ) -> CandidateEvaluation:
+    """Full chain for a user-entered vacancy text against a stored resume."""
+    return evaluate_with_texts(vacancy_text, _resume_text(resume_id), "custom", resume_id, model)
 
 
 def _main() -> None:

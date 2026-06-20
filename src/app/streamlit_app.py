@@ -22,7 +22,14 @@ import pandas as pd
 import streamlit as st
 
 from src import config
+from src.data.preprocessing import build_vacancy_text
 from src.vectorstore.search import ResumeSearcher
+
+
+def _pipeline():
+    """Lazy import of the LLM pipeline module (keeps app start light)."""
+    from src.llm import pipeline
+    return pipeline
 
 st.set_page_config(page_title="HR AI Scout", page_icon="🧭", layout="wide")
 
@@ -53,15 +60,13 @@ def load_resumes_indexed() -> pd.DataFrame:
     return r.set_index(config.RESUME_ID)
 
 
-def run_llm(vacancy_id: str, resume_id: str, model: str) -> dict:
-    """Run the LLM pipeline once per (vacancy, resume, model), cached in session."""
-    key = (vacancy_id, resume_id, model)
+def run_llm(cache_key: tuple, compute) -> dict:
+    """Run/cached an LLM evaluation. `compute` is a no-arg fn returning the
+    pydantic CandidateEvaluation; cached per cache_key in session state."""
     cache = st.session_state.setdefault("llm_cache", {})
-    if key not in cache:
-        from src.llm.pipeline import evaluate_candidate
-
-        cache[key] = evaluate_candidate(vacancy_id, resume_id, model).model_dump()
-    return cache[key]
+    if cache_key not in cache:
+        cache[cache_key] = compute().model_dump()
+    return cache[cache_key]
 
 
 # --- search tab ------------------------------------------------------------
@@ -87,55 +92,109 @@ def render_search_tab(searcher: ResumeSearcher, vacancies: pd.DataFrame, resumes
     if min_exp > 0:
         filters["min_experience_months"] = int(min_exp)
 
-    # Vacancy picker (searchable by name).
+    source = st.radio("Источник вакансии", ["📚 Из базы", "✍️ Своя вакансия"], horizontal=True)
+    if source == "📚 Из базы":
+        vacancy_key, vacancy_text, hits = _vacancy_from_db(searcher, vacancies, top_k, filters, mode)
+        llm_compute = lambda rid: (lambda: _pipeline().evaluate_candidate(vacancy_key, rid, model))
+    else:
+        vacancy_key, vacancy_text, hits = _vacancy_manual(searcher, vacancies, top_k, filters, mode)
+        llm_compute = lambda rid: (lambda: _pipeline().evaluate_custom_vacancy(vacancy_text, rid, model))
+
+    if hits is None:
+        return  # nothing to show yet (e.g. manual mode awaiting input) or error already shown
+    if not hits:
+        st.warning("Ничего не найдено под заданные фильтры.")
+        return
+
+    st.subheader(f"Top-{len(hits)} кандидатов · режим `{mode}`"
+                 + (f" · фильтры: {filters}" if filters else ""))
+    for rank, (resume_id, score) in enumerate(hits, start=1):
+        _render_candidate(rank, resume_id, score, resumes, vacancy_key, model, llm_compute)
+
+
+def _vacancy_from_db(searcher, vacancies, top_k, filters, mode):
+    """Pick an existing vacancy; retrieve immediately via its stored vector."""
     vacancies = vacancies.copy()
     vacancies["label"] = vacancies["vacancy_name"].fillna("(без названия)") + "  ·  #" + vacancies[config.VACANCY_ID]
-    label = st.selectbox("Вакансия", vacancies["label"].tolist(),
-                         index=0, placeholder="Начните вводить название...")
+    label = st.selectbox("Вакансия", vacancies["label"].tolist(), index=0,
+                         placeholder="Начните вводить название...")
     vrow = vacancies.loc[vacancies["label"] == label].iloc[0]
     vacancy_id = vrow[config.VACANCY_ID]
+    st.session_state["db_vrow"] = vrow.to_dict()  # for optional prefill in manual mode
 
     with st.expander("Описание вакансии", expanded=False):
         st.markdown(f"**{vrow.get('vacancy_name', '')}**  ·  {vrow.get('vacancy_area', '')}  "
                     f"·  опыт: {vrow.get('vacancy_experience', '—')}")
         st.write(vrow.get("vacancy_description", ""))
 
-    st.subheader(f"Top-{top_k} кандидатов · режим `{mode}`"
-                 + (f" · фильтры: {filters}" if filters else ""))
-
     try:
         hits = searcher.search_resumes(vacancy_id, top_k=top_k, filters=filters or None, mode=mode)
-    except Exception as exc:  # noqa: BLE001 - surface any retrieval/Qdrant error in UI
+    except Exception as exc:  # noqa: BLE001
         st.error(f"Ошибка поиска: {exc}\n\nЗапущен ли Qdrant (`docker compose up -d qdrant`)?")
-        return
-
-    if not hits:
-        st.warning("Ничего не найдено под заданные фильтры.")
-        return
-
-    for rank, (resume_id, score) in enumerate(hits, start=1):
-        rrow = resumes.loc[resume_id] if resume_id in resumes.index else None
-        title = rrow["resume_title"] if rrow is not None else "?"
-        location = rrow.get("resume_location", "") if rrow is not None else ""
-        with st.expander(f"**{rank}. {title}**  ·  score {score:.4f}  ·  {location}  ·  #{resume_id}"):
-            if rrow is not None:
-                st.caption(
-                    f"Специализация: {rrow.get('resume_specialization', '—')} | "
-                    f"Последняя должность: {rrow.get('resume_last_position', '—')} | "
-                    f"Опыт, мес.: {rrow.get('resume_experience_months', '—')}")
-                st.write("**Навыки:** " + str(rrow.get("resume_skills", "—")))
-            key = (vacancy_id, resume_id, model)
-            shown = st.session_state.setdefault("llm_shown", set())
-            if st.button("🤖 LLM-анализ соответствия", key=f"llm-{resume_id}"):
-                shown.add(key)
-            if key in shown:  # keep result visible across reruns (cached)
-                _render_llm_result(vacancy_id, resume_id, model)
+        return vacancy_id, "", None
+    return vacancy_id, vrow.get("vacancy_description", ""), hits
 
 
-def _render_llm_result(vacancy_id: str, resume_id: str, model: str):
+def _vacancy_manual(searcher, vacancies, top_k, filters, mode):
+    """Enter a vacancy by hand (optionally prefilled from a DB vacancy)."""
+    if st.button("⬇️ Подгрузить текст из выбранной в базе вакансии"):
+        v = st.session_state.get("db_vrow", {})
+        st.session_state["m_name"] = str(v.get("vacancy_name", "") or "")
+        st.session_state["m_desc"] = str(v.get("vacancy_description", "") or "")
+        st.session_state["m_exp"] = str(v.get("vacancy_experience", "") or "")
+
+    name = st.text_input("Название вакансии", key="m_name")
+    desc = st.text_area("Описание вакансии (требования, обязанности)", key="m_desc", height=200)
+    exp = st.text_input("Требуемый опыт", key="m_exp")
+
+    row = pd.DataFrame([{"vacancy_name": name, "vacancy_description": desc, "vacancy_experience": exp}])
+    vacancy_text = build_vacancy_text(row).iloc[0]
+
+    if not vacancy_text.strip():
+        st.info("Введите хотя бы описание вакансии и нажмите «Найти кандидатов».")
+        return "custom", "", None
+    if not st.button("🔎 Найти кандидатов", type="primary"):
+        # keep previous results (if any) so reruns from other widgets don't clear them
+        cached = st.session_state.get("manual_hits")
+        return "custom", st.session_state.get("manual_text", vacancy_text), cached
+
+    try:
+        with st.spinner("Эмбеддинг вакансии и поиск кандидатов..."):
+            hits = searcher.search_by_text(vacancy_text, top_k=top_k, filters=filters or None, mode=mode)
+    except Exception as exc:  # noqa: BLE001
+        st.error(f"Ошибка поиска: {exc}\n\nЗапущен ли Qdrant?")
+        return "custom", vacancy_text, None
+    st.session_state["manual_hits"] = hits
+    st.session_state["manual_text"] = vacancy_text
+    return "custom", vacancy_text, hits
+
+
+def _render_candidate(rank, resume_id, score, resumes, vacancy_key, model, llm_compute):
+    rrow = resumes.loc[resume_id] if resume_id in resumes.index else None
+    title = rrow["resume_title"] if rrow is not None else "?"
+    location = rrow.get("resume_location", "") if rrow is not None else ""
+    with st.expander(f"**{rank}. {title}**  ·  score {score:.4f}  ·  {location}  ·  #{resume_id}"):
+        if rrow is not None:
+            st.caption(
+                f"Специализация: {rrow.get('resume_specialization', '—')} | "
+                f"Последняя должность: {rrow.get('resume_last_position', '—')} | "
+                f"Опыт, мес.: {rrow.get('resume_experience_months', '—')}")
+            st.markdown("**Навыки:** " + str(rrow.get("resume_skills", "—")))
+            last_exp = str(rrow.get("resume_last_experience_description", "") or "").strip()
+            st.markdown("**Описание последнего опыта** (на этом основаны выводы LLM):")
+            st.write(last_exp if last_exp and last_exp.lower() != "nan" else "—")
+        key = (vacancy_key, resume_id, model)
+        shown = st.session_state.setdefault("llm_shown", set())
+        if st.button("🤖 LLM-анализ соответствия", key=f"llm-{vacancy_key}-{resume_id}"):
+            shown.add(key)
+        if key in shown:  # keep result visible across reruns (cached)
+            _render_llm_result(key, llm_compute(resume_id), model)
+
+
+def _render_llm_result(cache_key: tuple, compute, model: str):
     try:
         with st.spinner(f"LLM ({model}): извлечение → gap-анализ → скоринг..."):
-            result = run_llm(vacancy_id, resume_id, model)
+            result = run_llm(cache_key, compute)
     except Exception as exc:  # noqa: BLE001
         st.error(f"Ошибка LLM: {exc}\n\nЗадан ли ключ в `.env` (groq_api_key)?")
         return

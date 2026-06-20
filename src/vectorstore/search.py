@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 import pickle
-import re
 
 import pandas as pd
 from qdrant_client import models
@@ -28,13 +27,14 @@ from qdrant_client import models
 from src import config
 from src.data.preprocessing import build_resume_text, build_vacancy_text
 from src.vectorstore import client as vsclient
-
-_TOKEN_RE = re.compile(r"\w+", re.UNICODE)
+from src.vectorstore import text_norm
 
 
 def _tokenize(text: str) -> list[str]:
-    """Lowercase + \\w+ tokenization. No lemmatization/stopwords (see Open questions)."""
-    return _TOKEN_RE.findall(text.lower())
+    """BM25 tokenizer — lemmatized or simple per config.BM25_LEMMATIZE."""
+    if config.BM25_LEMMATIZE:
+        return text_norm.normalize_tokens(text)
+    return text_norm.simple_tokens(text)
 
 
 class ResumeSearcher:
@@ -126,32 +126,46 @@ class ResumeSearcher:
         if config.BM25_RESUMES_PKL.exists():
             with open(config.BM25_RESUMES_PKL, "rb") as fh:
                 blob = pickle.load(fh)
-            self._bm25, self._bm25_ids = blob["bm25"], blob["ids"]
-            return
+            if blob.get("version") == config.BM25_NORM_VERSION:
+                self._bm25, self._bm25_ids = blob["bm25"], blob["ids"]
+                return
+            print("BM25 cache outdated (tokenization changed) — rebuilding ...", flush=True)
         from rank_bm25 import BM25Okapi
 
-        print("Building BM25 index over resumes (one-time) ...", flush=True)
+        norm = "lemmatized" if config.BM25_LEMMATIZE else "simple"
+        print(f"Building BM25 index over resumes ({norm} tokenization, one-time) ...", flush=True)
         texts = build_resume_text(self.resumes)
         corpus = [_tokenize(t) for t in texts]
         self._bm25 = BM25Okapi(corpus)
         self._bm25_ids = self.resumes[config.RESUME_ID].tolist()
         with open(config.BM25_RESUMES_PKL, "wb") as fh:
-            pickle.dump({"bm25": self._bm25, "ids": self._bm25_ids}, fh)
+            pickle.dump({"version": config.BM25_NORM_VERSION,
+                         "bm25": self._bm25, "ids": self._bm25_ids}, fh)
+
+    def _embed_query(self, text: str):
+        """Embed an arbitrary vacancy text on the fly (for ad-hoc vacancies)."""
+        return vsclient.embed_texts([text], show_progress=False)[0].tolist()
 
     # --- single-mode rankers (return ranked list of resume_id) -------------
-    def _dense_ranked(self, vacancy_id, limit, qfilter) -> list[tuple[str, float]]:
+    def _dense_by_vector(self, vector, limit, qfilter) -> list[tuple[str, float]]:
         hits = self.qc.query_points(
-            config.COLLECTION_RESUMES, query=self._vacancy_vector(vacancy_id),
+            config.COLLECTION_RESUMES, query=vector,
             limit=limit, query_filter=qfilter, with_payload=["resume_id"]).points
         return [(str(h.payload["resume_id"]), float(h.score)) for h in hits]
 
-    def _bm25_ranked(self, vacancy_id, limit, allowed: set[str] | None) -> list[tuple[str, float]]:
+    def _dense_ranked(self, vacancy_id, limit, qfilter) -> list[tuple[str, float]]:
+        return self._dense_by_vector(self._vacancy_vector(vacancy_id), limit, qfilter)
+
+    def _bm25_by_text(self, text, limit, allowed: set[str] | None) -> list[tuple[str, float]]:
         self._ensure_bm25()
-        scores = self._bm25.get_scores(_tokenize(self._vacancy_text(vacancy_id)))
+        scores = self._bm25.get_scores(_tokenize(text))
         ranked = sorted(zip(self._bm25_ids, scores), key=lambda x: x[1], reverse=True)
         if allowed is not None:
             ranked = [(rid, s) for rid, s in ranked if rid in allowed]
         return [(rid, float(s)) for rid, s in ranked[:limit]]
+
+    def _bm25_ranked(self, vacancy_id, limit, allowed: set[str] | None) -> list[tuple[str, float]]:
+        return self._bm25_by_text(self._vacancy_text(vacancy_id), limit, allowed)
 
     @staticmethod
     def _rrf(rankings: list[list[tuple[str, float]]], top_k: int) -> list[tuple[str, float]]:
@@ -181,6 +195,32 @@ class ResumeSearcher:
             pool = max(top_k, config.HYBRID_CANDIDATE_POOL)
             dense = self._dense_ranked(vacancy_id, pool, qfilter)
             bm25 = self._bm25_ranked(vacancy_id, pool, self._allowed_ids(qfilter))
+            return self._rrf([dense, bm25], top_k)
+        raise ValueError(f"unknown mode {mode!r} (expected dense|bm25|hybrid)")
+
+    def search_by_text(
+        self,
+        vacancy_text: str,
+        top_k: int = config.DEFAULT_TOP_K,
+        filters: dict | None = None,
+        mode: str = "dense",
+    ) -> list[tuple[str, float]]:
+        """Like search_resumes but for an ad-hoc vacancy given as raw text.
+
+        Embeds the text on the fly (loads the embedding model) instead of
+        retrieving a stored vacancy vector — used for user-entered vacancies in
+        the UI (wiki/LLM_Pipeline.md, Этап 6)."""
+        qfilter = self._build_qdrant_filter(filters)
+
+        if mode == "bm25":
+            return self._bm25_by_text(vacancy_text, top_k, self._allowed_ids(qfilter))
+        vector = self._embed_query(vacancy_text)
+        if mode == "dense":
+            return self._dense_by_vector(vector, top_k, qfilter)
+        if mode == "hybrid":
+            pool = max(top_k, config.HYBRID_CANDIDATE_POOL)
+            dense = self._dense_by_vector(vector, pool, qfilter)
+            bm25 = self._bm25_by_text(vacancy_text, pool, self._allowed_ids(qfilter))
             return self._rrf([dense, bm25], top_k)
         raise ValueError(f"unknown mode {mode!r} (expected dense|bm25|hybrid)")
 

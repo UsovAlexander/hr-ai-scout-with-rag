@@ -41,17 +41,18 @@ def get_embedder(model_name: str = config.EMBEDDING_MODEL):
     return SentenceTransformer(model_name, device=device)
 
 
-def embed_texts(texts, model_name: str = config.EMBEDDING_MODEL):
+def embed_texts(texts, model_name: str = config.EMBEDDING_MODEL, show_progress: bool = True):
     """Embed a list of strings, returning a list[list[float]].
 
     Batched per project_spec (batch_size=64). Normalized so cosine == dot,
     which matches the Cosine distance we configure the collections with.
+    `show_progress=False` for single ad-hoc queries (no progress bar noise).
     """
     model = get_embedder(model_name)
     vectors = model.encode(
         list(texts),
         batch_size=config.EMBEDDING_BATCH_SIZE,
-        show_progress_bar=True,
+        show_progress_bar=show_progress,
         normalize_embeddings=True,
         convert_to_numpy=True,
     )
