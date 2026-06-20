@@ -103,6 +103,16 @@ RRF_K = 60
 # How many candidates to pull from each ranker before fusing in hybrid mode.
 HYBRID_CANDIDATE_POOL = 100
 
+# --- LLM layer (Этап 5) ----------------------------------------------------
+# OpenAI-compatible endpoint. Default: Groq (project uses a Groq API key).
+LLM_BASE_URL = "https://api.groq.com/openai/v1"
+LLM_API_KEY_ENV = "GROQ_API_KEY"
+# Switchable, like the embedding model. Groq options the project has used:
+#   llama-3.3-70b-versatile (default) | openai/gpt-oss-120b | llama-3.1-8b-instant
+LLM_MODEL = "llama-3.3-70b-versatile"
+LLM_TEMPERATURE = 0.2  # low for consistent structured output
+PROMPTS_DIR = PROJECT_ROOT / "src" / "llm" / "prompts"
+
 # --- Evaluation (Этап 4) ---------------------------------------------------
 EVAL_RESULTS_DIR = PROJECT_ROOT / "eval" / "results"
 EVAL_SET_PARQUET = EVAL_RESULTS_DIR / "eval_set.parquet"

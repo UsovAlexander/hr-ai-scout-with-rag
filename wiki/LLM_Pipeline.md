@@ -30,9 +30,12 @@ src/llm/pipeline.py    # оркестрация промптов
 
 ## Стек LLM
 
-- LLM через OpenAI-совместимый API (Claude / GPT-4o). При выборе модели
-  Claude — ориентироваться на актуальные модели (Opus 4.x / Sonnet 4.x).
-- `instructor` для structured output (pydantic-схемы).
+- LLM через OpenAI-совместимый API. **Используется Groq** (endpoint
+  `https://api.groq.com/openai/v1`), дефолтная модель
+  **`llama-3.3-70b-versatile`**; альтернативы (переключаются через
+  `config.LLM_MODEL`): `openai/gpt-oss-120b`, `llama-3.1-8b-instant`.
+- `instructor` (Mode.JSON) для structured output по pydantic-схемам.
+- Ключ берётся из `GROQ_API_KEY`/`groq_api_key` (env или `.env`, gitignored).
 
 ## Связь с остальной системой
 
@@ -41,14 +44,35 @@ src/llm/pipeline.py    # оркестрация промптов
 - **Выход:** структурированный профиль, список gaps, score 0–100, объяснение —
   отображается в Streamlit UI ([[Roadmap]] Этап 6).
 
+## Реализовано (Этап 5)
+
+Код: `src/llm/schemas.py` (pydantic), `src/llm/prompts/*.txt` (шаблоны),
+`src/llm/pipeline.py` (оркестрация). Запуск:
+`python -m src.llm.pipeline --vacancy_id <id> --resume_id <id>`.
+
+- **Три шага → три промпта:** `extraction.txt` → `gap_analysis.txt` →
+  `scoring.txt`. Объяснение (`explanation`) вошло в шаг скоринга как поле
+  схемы (а не отдельный `explanation.txt` из дерева спеки).
+- **Схемы:** `CandidateProfile` → `GapAnalysis` (`Gap.severity ∈
+  {critical, minor}` + `reasoning`-CoT) → `MatchVerdict` (`score` 0–100,
+  `recommendation ∈ {invite, consider, reject}`, `explanation`). Полный
+  результат — `CandidateEvaluation`.
+- **Рендеринг промптов** через `{{token}}`-плейсхолдеры (replace, не
+  `str.format` — текст резюме может содержать `{`).
+- **Живой тест пройден:** пара вакансия 126167948 (SAP ABAP) × резюме →
+  валидный профиль, gap-анализ с severity, score 40/`reject` с объяснением.
+
 ## Open questions
 
-- В `src/llm/prompts/` спека упоминает три файла (`gap_analysis.txt`,
-  `scoring.txt`, `explanation.txt`), но шагов в цепочке тоже три, причём
-  первый — «извлечение фактов». Соответствие «шаг ↔ файл промпта» не
-  однозначно: извлечение фактов может быть отдельным промптом или частью
-  gap-анализа. Уточнить при реализации.
-- Score 0–100 от LLM и бинарный `target` из [[Датасет]] — связь/калибровка
-  между ними не определена (используется ли `target` для валидации score?).
-- Какой именно текст резюме/вакансии подаётся в промпт (полный или
-  усечённый под контекст) — не задано.
+- ~~Соответствие «шаг ↔ файл промпта»~~ — **решено (Этап 5):**
+  `extraction → gap_analysis → scoring`, explanation внутри scoring.
+- **Score vs `target`:** на тесте релевантному (по retrieval) резюме LLM дал
+  `reject` — LLM строго проверяет перечисленные требования, а `target=1` = факт
+  шортлиста. Это разные сигналы; калибровать/валидировать score по `target` —
+  открыто (связано с [[Евалюация]]).
+- **`years_experience` вышел `null`:** текст для извлечения
+  (`build_resume_text`) НЕ включает `resume_experience_months` /
+  `resume_total_experience` (они в payload, не в тексте) → модель не вывела стаж.
+  Если стаж важен в профиле — добавить эти поля в текст экстракции.
+- Текст резюме/вакансии подаётся **полностью** (без усечения под контекст) —
+  для длинных описаний может потребоваться обрезка/чанкинг.

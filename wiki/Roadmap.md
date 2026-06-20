@@ -53,11 +53,15 @@
 > обгоняет BM25 (0.243) — мотивирует взвешенный fusion. random совпал с теор. полом.
 > Детали и таблица — [[Евалюация]].
 
-## Этап 5 — LLM-слой
-- [ ] Промпт 1: извлечение фактов (pydantic + `instructor`).
-- [ ] Промпт 2: gap-анализ (chain-of-thought).
-- [ ] Промпт 3: скоринг 0–100 + объяснение.
-- [ ] Промпты как `.txt`-шаблоны в `src/llm/prompts/` — см. [[LLM_Pipeline]].
+## Этап 5 — LLM-слой ✅
+- [x] Промпт 1: извлечение фактов (`extraction.txt`, pydantic + `instructor`).
+- [x] Промпт 2: gap-анализ с severity + CoT (`gap_analysis.txt`).
+- [x] Промпт 3: скоринг 0–100 + рекомендация + объяснение (`scoring.txt`).
+- [x] Промпты как `.txt`-шаблоны в `src/llm/prompts/`; код — `src/llm/{schemas,pipeline}.py`.
+- [x] Провайдер: Groq (`llama-3.3-70b-versatile`), ключ из `.env`; живой тест пройден.
+
+> Нюанс: релевантному резюме LLM дал `reject` — score vs `target` измеряют разное,
+> см. [[LLM_Pipeline]] Open questions.
 
 ## Этап 6 — Streamlit-приложение
 - [ ] Выбор вакансии (dropdown/поиск по `vacancy_name`).
