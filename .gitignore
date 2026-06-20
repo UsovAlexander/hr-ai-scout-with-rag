@@ -1,6 +1,7 @@
 # Data (large / derived — not versioned)
 dataset/*.csv
 *.parquet
+*.pkl
 qdrant_storage/
 
 # Python

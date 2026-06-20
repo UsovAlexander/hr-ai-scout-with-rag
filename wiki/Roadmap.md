@@ -24,22 +24,34 @@
 
 > Все счётчики после запуска точно совпали со спекой. Запуск: `python -m src.data.loader` (~11 c).
 
-## Этап 2 — Индексация в Qdrant
-- [ ] Поднять Qdrant через docker-compose.
-- [ ] Собрать тексты для эмбеддинга (конкатенация полей) — см. [[Векторная_БД]].
-- [ ] Посчитать эмбеддинги батчами (`sentence-transformers`, `batch_size=64`).
-- [ ] Залить коллекции `resumes` и `vacancies` с payload.
+## Этап 2 — Индексация в Qdrant ✅
+- [x] Поднять Qdrant через docker-compose (запущен, v1.18.2).
+- [x] Собрать тексты для эмбеддинга (конкатенация полей) — см. [[Векторная_БД]].
+- [x] Посчитать эмбеддинги батчами (LaBSE-en-ru, dim 768, `batch_size=64`, MPS).
+- [x] Залить коллекции `resumes` (20 845) и `vacancies` (3 409) с payload, Cosine.
+- [x] Код: `src/vectorstore/{client.py, indexer.py}`; семантическая проверка пройдена.
 
-## Этап 3 — Retrieval
-- [ ] `search_resumes(vacancy_id, top_k=20, filters=None)`.
-- [ ] Фильтры по payload (город, опыт, статус поиска).
-- [ ] Hybrid-режим (dense + BM25 + RRF) — см. [[Hybrid_Search]].
+> Запуск: `python -m src.vectorstore.indexer`. Известный нюанс: `resume_salary`
+> не попал в payload (форматированная строка) — см. [[Векторная_БД]] Open questions.
 
-## Этап 4 — Оффлайн-евалюация retrieval (ключевая часть)
-- [ ] `build_eval_set.py` — сэмплинг из `target=1/0`.
-- [ ] `retrieval_metrics.py` — NDCG@10, MRR, Recall@10, Precision@10.
-- [ ] Сравнить dense / BM25 / hybrid+RRF → `eval/results/comparison.md`.
-- [ ] (Опц.) сравнить две модели эмбеддингов — см. [[Евалюация]].
+## Этап 3 — Retrieval ✅
+- [x] `search_resumes(vacancy_id, top_k=20, filters=None, mode=...)` — `src/vectorstore/search.py`.
+- [x] Фильтры по payload (город, статус поиска, опыт, возраст) через Qdrant `Filter`.
+- [x] Три режима: dense / bm25 (`rank_bm25`) / hybrid (собственный RRF, k=60) — см. [[Hybrid_Search]].
+- [x] BM25-индекс кешируется (`dataset/bm25_resumes.pkl`); смоук-тест всех режимов + фильтра пройден.
+
+> Hybrid убрал PHP-ложные срабатывания чистого dense на «SAP ABAP». Qdrant-native
+> sparse-hybrid НЕ делали (выбран in-memory rank_bm25) — см. [[Hybrid_Search]] Open questions.
+
+## Этап 4 — Оффлайн-евалюация retrieval (ключевая часть) ✅
+- [x] `build_eval_set.py` — сэмплинг ground truth из `target=1` (500 вакансий, seed=42).
+- [x] `retrieval_metrics.py` — NDCG@10, MRR, Recall@10, Precision@10 с нуля + self-test.
+- [x] `run_eval.py` — сравнение random/dense/BM25/hybrid → `eval/results/comparison.md`.
+- [ ] (Опц.) сравнить две модели эмбеддингов (e5) — не делали, см. [[Евалюация]].
+
+> **Ключевой вывод:** BM25 ≫ dense (recall@10 0.435 vs 0.112), наивный hybrid не
+> обгоняет BM25 (0.243) — мотивирует взвешенный fusion. random совпал с теор. полом.
+> Детали и таблица — [[Евалюация]].
 
 ## Этап 5 — LLM-слой
 - [ ] Промпт 1: извлечение фактов (pydantic + `instructor`).

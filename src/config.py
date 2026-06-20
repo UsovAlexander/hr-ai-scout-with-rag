@@ -18,6 +18,9 @@ VACANCIES_PARQUET = DATASET_DIR / "vacancies.parquet"
 RESUMES_PARQUET = DATASET_DIR / "resumes.parquet"
 PAIRS_PARQUET = DATASET_DIR / "pairs.parquet"  # ground truth for eval/
 
+# Cached BM25 index over the resume corpus (Этап 3)
+BM25_RESUMES_PKL = DATASET_DIR / "bm25_resumes.pkl"
+
 # --- CSV reading -----------------------------------------------------------
 # total_df.csv is ~2GB → read in chunks, never load naively into RAM.
 READ_CHUNKSIZE = 100_000
@@ -92,3 +95,20 @@ QDRANT_HOST = "localhost"
 QDRANT_PORT = 6333
 COLLECTION_RESUMES = "resumes"
 COLLECTION_VACANCIES = "vacancies"
+
+# --- Retrieval (Этап 3) ----------------------------------------------------
+DEFAULT_TOP_K = 20
+# Reciprocal Rank Fusion constant (standard default). See wiki/Hybrid_Search.md.
+RRF_K = 60
+# How many candidates to pull from each ranker before fusing in hybrid mode.
+HYBRID_CANDIDATE_POOL = 100
+
+# --- Evaluation (Этап 4) ---------------------------------------------------
+EVAL_RESULTS_DIR = PROJECT_ROOT / "eval" / "results"
+EVAL_SET_PARQUET = EVAL_RESULTS_DIR / "eval_set.parquet"
+EVAL_PERVAC_PARQUET = EVAL_RESULTS_DIR / "per_vacancy_metrics.parquet"
+COMPARISON_MD = EVAL_RESULTS_DIR / "comparison.md"
+EVAL_K = 10            # report metrics @k
+EVAL_RETRIEVE_DEPTH = 100  # depth pulled per query (MRR can see beyond k)
+EVAL_SAMPLE_SIZE = 500     # vacancies sampled for the comparison (0 = all)
+EVAL_SEED = 42
