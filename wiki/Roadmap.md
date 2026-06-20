@@ -81,11 +81,12 @@
   Под капотом: `ResumeSearcher.search_by_text` (эмбеддит текст на лету, см.
   [[Hybrid_Search]]) + `pipeline.evaluate_custom_vacancy` ([[LLM_Pipeline]]).
 
-## Этап 7 — README и документация
-- [ ] Архитектурная диаграмма.
-- [ ] Таблица метрик retrieval из Этапа 4.
-- [ ] GIF/скриншот Streamlit-демо.
-- [ ] Раздел «что нового vs классический classification-подход».
+## Этап 7 — README и документация ✅ (кроме скриншота)
+- [x] Архитектурная диаграмма (ASCII в `README.md`).
+- [x] Таблица метрик retrieval из Этапа 4 + содержательные выводы + ablation.
+- [x] Раздел «что нового vs классический classification-подход» (таблица сравнения).
+- [x] Полный quickstart, стек, структура проекта, указатель на `wiki/`.
+- [ ] GIF/скриншот Streamlit-демо → `docs/demo.png` (нужен живой прогон UI; за пользователем).
 
 ## Open questions
 
